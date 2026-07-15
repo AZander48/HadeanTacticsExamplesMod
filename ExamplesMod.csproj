@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+ 
+  <Import Condition="Exists('ExamplesMod.props')" Project="ExamplesMod.props" />
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RestoreAdditionalProjectSources>
+        https://nuget.bepinex.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
+	  <!--Allow access of private members at runtime.-->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--These properties will control the generated PluginInfo. Version is also used by various parts of the build system.-->
+    <BepInExPluginGuid>ExamplesMod</BepInExPluginGuid>
+    <BepInExPluginName>ExamplesMod</BepInExPluginName>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Analyzers" Version="1.0.8" PrivateAssets="all" />
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="1.1.0" />
+    <PackageReference Include="NuggetTactics.SDK" Version="1.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEngine.IMGUIModule" Condition="Exists('$(HadeanTacticsManaged)\UnityEngine.IMGUIModule.dll')">
+      <HintPath>$(HadeanTacticsManaged)\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule" Condition="Exists('$(HadeanTacticsManaged)\UnityEngine.InputLegacyModule.dll')">
+      <HintPath>$(HadeanTacticsManaged)\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.InputSystem" Condition="Exists('$(HadeanTacticsManaged)\Unity.InputSystem.dll')">
+      <HintPath>$(HadeanTacticsManaged)\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI" Condition="Exists('$(HadeanTacticsManaged)\UnityEngine.UI.dll')">
+      <HintPath>$(HadeanTacticsManaged)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CopyMod" AfterTargets="PostBuildEvent" Condition="'$(HadeanTacticsDir)' != ''">
+      <ItemGroup>
+          <Binaries Include="$(TargetPath)"/>
+          <Binaries Include="$(TargetDir)/$(TargetName).pdb"/>
+      </ItemGroup>
+
+      <Copy SourceFiles="@(Binaries)" DestinationFolder="$(HadeanTacticsDir)/BepInEx/plugins/$(TargetName)" />
+
+      <PropertyGroup>
+          <ExportFolder>bin/Publish</ExportFolder>
+      </PropertyGroup>
+      
+      <RemoveDir Directories="$(IntermediateOutputPath)/archive"/>
+      <MakeDir Directories="$(ExportFolder)"/>
+      <Copy SourceFiles="@(Binaries)" DestinationFolder="$(IntermediateOutputPath)/archive"/>
+      <ZipDirectory SourceDirectory="$(IntermediateOutputPath)/archive" DestinationFile="$(ExportFolder)/$(TargetName).zip" Overwrite="True"/>
+  </Target>
+</Project>
