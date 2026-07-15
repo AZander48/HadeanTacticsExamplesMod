@@ -15,12 +15,16 @@ namespace ExamplesMod;
 public class ExamplesMod : BaseUnityPlugin
 {
     private TrapCardManager _trapCardManager = null!;
-
+    private DamageSpellCardManager _damageSpellCardManager = null!;
+    private EnchantCardManager _enchantCardManager = null!;
+    
     private void Awake()
     {
         // Put your initialization logic here
         Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} has loaded!");
 
         _trapCardManager = new TrapCardManager(Logger, Config);
+        _damageSpellCardManager = new DamageSpellCardManager(Logger, Config);
+        _enchantCardManager = new EnchantCardManager(Logger, Config);
     }
 }
