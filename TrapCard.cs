@@ -1,8 +1,5 @@
 using System;
-using System.Configuration;
 using System.Collections.Generic;
-using System.Reflection;
-using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
@@ -14,12 +11,25 @@ namespace ExamplesMod;
 public class TrapCardManager
 {
     private ManualLogSource _log = null!;
-
     private ConfigEntry<bool> _debug = null!;
-    private ConfigEntry<TrapCardId> _currentTrapCard = null!;
-    private bool _burnRegistered = false;
-    
+    private ConfigEntry<TrapBuildMode> _buildMode = null!;
+    private ConfigEntry<string> _visualDonorId = null!;
+    private ConfigEntry<int> _burnValue = null!;
+
     private CardManager _cardManager = null!;
+    private bool _burnRegistered = false;
+
+    private const string BurnTrapUnitId = "trap_burn";
+    private const string BurnTrapSkillId = "skill_trapBurn";
+    private const string BurnTrapCardId = "card_burnTrap";
+
+    private enum TrapBuildMode
+    {
+        /// <summary>new Unit { ... } with trap fields; borrows prefab/VFX from Visual Donor Id.</summary>
+        Custom,
+        /// <summary>Clone an existing trap unit id (Visual Donor Id), then rename to trap_burn.</summary>
+        Clone,
+    }
 
     public TrapCardManager(ManualLogSource log, ConfigFile config)
     {
@@ -27,86 +37,116 @@ public class TrapCardManager
 
         _log = log;
         InitConfigEntries(config);
-        RegisterBurnTrap();
-    }
-    
-    private enum TrapCardId
-    {
-        BurnTrap,
+        EnsureBurnTrapRegistered();
     }
 
     private void InitConfigEntries(ConfigFile config)
     {
         _debug = config.Bind("TrapCard", "Debug", false, "Enable or disable debug logging");
-        
+        _buildMode = config.Bind(
+            "TrapCard",
+            "Build Mode",
+            TrapBuildMode.Clone,
+            "Custom = build trap Unit from scratch. Clone = copy Visual Donor Id then rename.");
+        _visualDonorId = config.Bind(
+            "TrapCard",
+            "Visual Donor Id",
+            "trap_poison",
+            "Trap/unit id for model + VFX (Custom) or full clone source (Clone). Use InfoBox ID.");
+        _burnValue = config.Bind(
+            "TrapCard",
+            "Burn Value",
+            25,
+            "TrapEffect value passed into the Harmony burn branch.");
 
-        _currentTrapCard = config.Bind(
-        "TrapCard",
-        "Trap",
-        TrapCardId.BurnTrap,
-        new ConfigDescription(
-            "Select a trap, then add it to hand.",
-            null,
-            new ConfigurationManagerAttributes
-            {
-                CustomDrawer = entry =>
+        config.Bind(
+            "TrapCard",
+            "Add to hand",
+            false,
+            new ConfigDescription(
+                "Register the burn trap (if needed) and add the place card to hand.",
+                null,
+                new ConfigurationManagerAttributes
                 {
-                    var e = (ConfigEntry<TrapCardId>)entry;
-                    // dropdown
-                    if (GUILayout.Button(e.Value.ToString(), GUILayout.ExpandWidth(true)))
+                    CustomDrawer = _ =>
                     {
-                        // simple cycle; or use a real popup if you want
-                        var values = (TrapCardId[])Enum.GetValues(typeof(TrapCardId));
-                        int i = Array.IndexOf(values, e.Value);
-                        e.Value = values[(i + 1) % values.Length];
-                    }
-                    // button
-                    if (GUILayout.Button("Add to hand", GUILayout.ExpandWidth(false)))
-                        AddSelectedTrapToHand(e.Value);
-                },
-                HideDefaultButton = true,
-            })
-        );
+                        if (GUILayout.Button("Add to hand", GUILayout.ExpandWidth(false)))
+                            AddBurnTrapToHand();
+                    },
+                    HideDefaultButton = true,
+                }));
     }
 
-    private static readonly Effect burnEffect = new Effect(EffectType.TrapEffect) 
-    { 
-        value = 25, 
-        args = "burn",
-        dMod = new DamageMod(),
-
-    };
-
-    private static readonly EffectContainer burnSkill = new EffectContainer 
+    private EffectContainer BuildBurnSkill()
     {
-        id = "skill_trapBurn",
-        containerType = EffectContainerType.skillExtra,
-        targetType = TargetType.Source,
-        effects = new List<Effect> { burnEffect }
-    };
+        return new EffectContainer
+        {
+            id = BurnTrapSkillId,
+            containerType = EffectContainerType.skillExtra,
+            targetType = TargetType.Source,
+            effects = new List<Effect>
+            {
+                new Effect(EffectType.TrapEffect)
+                {
+                    value = _burnValue.Value,
+                    args = "burn",
+                    dMod = new DamageMod(),
+                }
+            }
+        };
+    }
 
-    private static readonly Unit burnTrapUnit = new Unit
+    /// <summary>Fully custom trap unit — no GetUnitById clone. Still needs a real prefab via donor.</summary>
+    private Unit BuildCustomTrap(EffectContainer skill, string visualDonorId)
     {
-        id = "trap_burn",
-        skillId = "skill_trapBurn",
-        pool = UnitPool.trap,
-        skills = new List<EffectContainer> { burnSkill },
-    };
+        return new Unit
+        {
+            id = BurnTrapUnitId,
+            appearId = BurnTrapUnitId, // resolved via AddOrReplaceUnitPrefab("trap_burn_prefab", donorModel)
+            assetRef = BurnTrapUnitId,
+            title = "Burn Trap",
+            pool = UnitPool.trap,
+            team = TeamType.Team1,
+            skillId = skill.id,
+            skills = new List<EffectContainer> { skill },
+        };
+    }
 
-    private static readonly Card burnTrapCard = new Card
+    /// <summary>Clone a real trap/unit, then retarget id + burn skill.</summary>
+    private Unit? BuildClonedTrap(UnitManager unitManager, EffectContainer skill, string templateId)
+    {
+        Unit unit = unitManager.GetUnitById(templateId);
+        if (unit == null)
+            return null;
+
+        unit.id = BurnTrapUnitId;
+        unit.appearId = BurnTrapUnitId;
+        unit.assetRef = BurnTrapUnitId;
+        unit.title = "Burn Trap";
+        unit.pool = UnitPool.trap;
+        unit.team = TeamType.Team1;
+        unit.skillId = skill.id;
+        unit.skills = new List<EffectContainer> { skill };
+        return unit;
+    }
+
+    private static readonly Card BurnTrapCard = new Card
     {
         title = "Burn Trap",
-        id = "card_burnTrap",
+        id = BurnTrapCardId,
+        heroId = "any",
         cardType = CardType.artifice,
         cardTargetType = TargetType.EmptyTile,
         baseCost = 0,
         deplete = 1,
         repeat = 1,
+        rarityIndex = 1,
+        description = "Place a burn trap. Trigger to burn enemies in range.",
         IsMod = false,
         modId = "ExamplesMod",
         effects = new List<Effect>
         {
-            new Effect(EffectType.Trap) { args = "trap_burn" }
+            new Effect(EffectType.Trap) { args = BurnTrapUnitId }
         }
     };
 
@@ -114,53 +154,76 @@ public class TrapCardManager
     {
         var unitManager = UnityEngine.Object.FindObjectOfType<UnitManager>();
         var relicManager = UnityEngine.Object.FindObjectOfType<RelicManager>();
-        if (relicManager == null || unitManager == null) return false;
-        
-        Unit burnUnit = unitManager.GetUnitById("trap_poison");
+        if (unitManager == null || relicManager == null)
+            return false;
 
-        if (burnUnit == null) return false;
+        string donorId = _visualDonorId.Value?.Trim() ?? "";
+        if (string.IsNullOrEmpty(donorId))
+        {
+            _log.LogError("Visual Donor Id is empty.");
+            return false;
+        }
 
-        relicManager.AddOrReplaceEffectContainer(burnSkill);
+        EffectContainer skill = BuildBurnSkill();
+        relicManager.AddOrReplaceEffectContainer(skill);
 
+        Unit? unit = _buildMode.Value switch
+        {
+            TrapBuildMode.Clone => BuildClonedTrap(unitManager, skill, donorId),
+            _ => BuildCustomTrap(skill, donorId),
+        };
 
-        /*  This is the code for replacing the trap_poison with custom assets
-        * place assets in the plugin directory as an asset bundle
-        string pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        string path = Path.Combine(pluginDir, "burnTrap"); // still wrong if burnTrap is a folder of raw assets
-        var bundle = AssetBundle.LoadFromFile(path);       // needs a bundle FILE
+        if (unit == null)
+        {
+            _log.LogError($"Clone failed: GetUnitById('{donorId}') was null.");
+            return false;
+        }
 
-        GameObject customModel = bundle.LoadAsset<GameObject>("asset_name_model");       // Unity asset name
-        GameObject customSkillVfx = bundle.LoadAsset<GameObject>("asset_name_skill");
-        GameObject cardVfx = bundle.LoadAsset<GameObject>("asset_name_card");
-        Sprite cardArt = bundle.LoadAsset<Sprite>("asset_name_card_art");
+        RegisterTrapVisuals(donorId);
+        unitManager.AddUnitToAllUnits(unit);
 
-        */
-    
-        // this uses poisen assets
-        GameObject customModel = PoolManager.GetUnitPrefab("trap_poison");
-        GameObject customSkillVfx = PoolManager.GetUnitSkillEffectPrefab("trap_poison_skill_prefab");
-        GameObject cardVfx = PoolManager.GetMiscPrefab("card_poisonTrap_prefab"); // if that key exists
-        Sprite cardArt = PoolManager.GetCardSprite("card_poisonTrap");
+        if (unitManager.GetUnitById(BurnTrapUnitId) == null)
+        {
+            _log.LogError($"'{BurnTrapUnitId}' missing after AddUnitToAllUnits.");
+            return false;
+        }
 
-        // adds the custom assets to the pool
-        PoolManager.AddOrReplaceUnitPrefab("trap_burn_prefab", customModel);
-        PoolManager.AddOrReplaceVisualEffect("trap_burn_skill_prefab", customSkillVfx);
-        PoolManager.AddOrReplaceVisualEffect("card_burnTrap_prefab", cardVfx);
-        PoolManager.AddOrReplaceSprite("card_burnTrap", cardArt);
+        if (_debug.Value)
+            _log.LogInfo($"Registered '{BurnTrapUnitId}' mode={_buildMode.Value} donor={donorId} skill={skill.id}.");
 
-        burnUnit.id = "trap_burn";
-        burnUnit.appearId = "trap_burn";
-        burnUnit.assetRef = "trap_burn";
-        burnUnit.title = "Burn Trap";
-        burnUnit.skillId = "skill_trapBurn";
-        burnUnit.skills = new List<EffectContainer> { burnSkill };
-        unitManager.AddUnitToAllUnits(burnUnit);
         return true;
     }
 
-    private void AddSelectedTrapToHand()
+    /// <summary>Borrow donor model / skill VFX / card art under trap_burn keys.</summary>
+    private void RegisterTrapVisuals(string donorId)
     {
-        AddSelectedTrapToHand(_currentTrapCard.Value);
+        GameObject model = PoolManager.GetUnitPrefab(donorId);
+        if (model != null)
+            PoolManager.AddOrReplaceUnitPrefab($"{BurnTrapUnitId}_prefab", model);
+
+        // Prefer donor-named skill VFX; fall back to poison trap keys used by vanilla decay trap.
+        GameObject skillVfx =
+            PoolManager.GetUnitSkillEffectPrefab($"{donorId}_skill_prefab")
+            ?? PoolManager.GetUnitSkillEffectPrefab("trap_poison_skill_prefab");
+        if (skillVfx != null)
+            PoolManager.AddOrReplaceVisualEffect($"{BurnTrapUnitId}_skill_prefab", skillVfx);
+
+        // Card play VFX / art: try donor card keys, then poison trap card.
+        string donorCardId = donorId.StartsWith("trap_", StringComparison.Ordinal)
+            ? $"card_{donorId.Substring("trap_".Length)}Trap"
+            : $"card_{donorId}";
+
+        GameObject cardVfx =
+            PoolManager.GetMiscPrefab($"{donorCardId}_prefab")
+            ?? PoolManager.GetMiscPrefab("card_poisonTrap_prefab");
+        if (cardVfx != null)
+            PoolManager.AddOrReplaceVisualEffect($"{BurnTrapCardId}_prefab", cardVfx);
+
+        Sprite cardArt =
+            PoolManager.GetCardSprite(donorCardId)
+            ?? PoolManager.GetCardSprite("card_poisonTrap");
+        if (cardArt != null)
+            PoolManager.AddOrReplaceSprite(BurnTrapCardId, cardArt);
     }
 
     private void EnsureBurnTrapRegistered()
@@ -169,53 +232,45 @@ public class TrapCardManager
         if (RegisterBurnTrap()) _burnRegistered = true;
     }
 
-    private void AddSelectedTrapToHand(TrapCardId trapCardId)
+    private void AddBurnTrapToHand()
     {
-        if (trapCardId == TrapCardId.BurnTrap)
+        // Allow re-register when switching Build Mode / donor between clicks.
+        _burnRegistered = false;
+        EnsureBurnTrapRegistered();
+        if (!_burnRegistered)
         {
-            EnsureBurnTrapRegistered();
-        }
-
-        Card trapCard = trapCardId switch
-        {
-            TrapCardId.BurnTrap => burnTrapCard,
-            _ => null!,
-        };
-
-        if (_debug.Value)
-        {
-            _log.LogInfo($"Adding trap card {trapCardId} to hand");
-        }
-
-        if (trapCard == null) 
-        {
-            _log.LogError($"Trap card {trapCardId} not found");
+            _log.LogError("Burn trap failed to register. Check Visual Donor Id / that managers exist (in a run).");
             return;
         }
 
         var cardManager = GetCardManager();
-
-        if (_debug.Value)
-        {
-            _log.LogInfo($"Card manager: {cardManager}");
-        }
-
         if (cardManager == null)
         {
             _log.LogError("Card manager not found");
             return;
         }
 
-        cardManager.DrawCardSimple(trapCard);
+        if (_debug.Value)
+            _log.LogInfo($"Adding burn trap ({_buildMode.Value}, donor={_visualDonorId.Value})");
+
+        RegisterCardInCompendium(BurnTrapCard);
+        cardManager.DrawCardSimple(BurnTrapCard);
     }
 
     private CardManager GetCardManager()
     {
-        _cardManager = GameObject.FindObjectOfType<CardManager>();
-
-        if (_cardManager == null) throw new Exception("CardManager not found");
-
+        if (_cardManager != null) return _cardManager;
+        _cardManager = UnityEngine.Object.FindObjectOfType<CardManager>();
         return _cardManager;
+    }
+
+    private void RegisterCardInCompendium(Card card)
+    {
+        var cardManager = GetCardManager();
+        if (cardManager == null) return;
+        if (string.IsNullOrEmpty(card.heroId))
+            card.heroId = "any";
+        cardManager.AddCardToAllCards(card);
     }
 }
 

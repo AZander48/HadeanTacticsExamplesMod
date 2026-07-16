@@ -22,11 +22,9 @@ public class DamageSpellCardManager
 
     public DamageSpellCardManager(ManualLogSource log, ConfigFile config)
     {
-        //new Harmony(PluginInfo.PLUGIN_GUID).PatchAll(typeof(DamageSpellCardEffectPatch).Assembly);
-
+        
         _log = log;
         InitConfigEntries(config);
-        registerCard(DamageSpellCard);
     }
 
     private void InitConfigEntries(ConfigFile config)
@@ -84,6 +82,7 @@ public class DamageSpellCardManager
     {
         title = "Damage Burn Spell",
         id = "card_damageBurnSpell",
+        heroId = "any",
         cardType = CardType.spell,
         cardTargetType = TargetType.EnemyOnly,
         baseCost = 0,
@@ -127,6 +126,7 @@ public class DamageSpellCardManager
         }
 
         cardManager.DrawCardSimple(card);
+        registerCard(card);
     }
 
     private CardManager GetCardManager()
@@ -139,6 +139,9 @@ public class DamageSpellCardManager
     private void registerCard(Card card)
     {
         var cardManager = GetCardManager();
+        if (cardManager == null) return;
+        if (string.IsNullOrEmpty(card.heroId))
+            card.heroId = "any";
         cardManager.AddCardToAllCards(card);
     }
 }

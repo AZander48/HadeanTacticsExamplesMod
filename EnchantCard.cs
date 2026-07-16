@@ -26,7 +26,6 @@ public class EnchantCardManager
 
         _log = log;
         InitConfigEntries(config);
-        registerCard(EnchantCard);
     }
 
     private void InitConfigEntries(ConfigFile config)
@@ -83,6 +82,7 @@ public class EnchantCardManager
     {
         title = "Enchant Spell",
         id = "card_enchantSpell",
+        heroId = "any",
         cardType = CardType.spell,
         cardTargetType = TargetType.AllyOnly,
         baseCost = 0,
@@ -124,6 +124,7 @@ public class EnchantCardManager
         }
 
         cardManager.DrawCardSimple(card);
+        registerCard(card);
     }
 
     private CardManager GetCardManager()
@@ -136,6 +137,9 @@ public class EnchantCardManager
     private void registerCard(Card card)
     {
         var cardManager = GetCardManager();
+        if (cardManager == null) return;
+        if (string.IsNullOrEmpty(card.heroId))
+            card.heroId = "any";
         cardManager.AddCardToAllCards(card);
     }
 }
