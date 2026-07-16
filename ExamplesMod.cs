@@ -19,6 +19,7 @@ public class ExamplesMod : BaseUnityPlugin
     private EnchantCardManager _enchantCardManager = null!;
     private SummonCardManager _summonCardManager = null!;
     private ExampleUnitManager _exampleUnitManager = null!;
+    private HeroUnitManager _heroUnitManager = null!;
     
     private void Awake()
     {
@@ -30,5 +31,6 @@ public class ExamplesMod : BaseUnityPlugin
         _enchantCardManager = new EnchantCardManager(Logger, Config);
         _summonCardManager = new SummonCardManager(Logger, Config);
         _exampleUnitManager = new ExampleUnitManager(Logger, Config);
+        _heroUnitManager = new HeroUnitManager(Logger, Config);
     }
 }
