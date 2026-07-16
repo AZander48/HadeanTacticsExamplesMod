@@ -18,6 +18,7 @@ public class ExamplesMod : BaseUnityPlugin
     private DamageSpellCardManager _damageSpellCardManager = null!;
     private EnchantCardManager _enchantCardManager = null!;
     private SummonCardManager _summonCardManager = null!;
+    private ExampleUnitManager _exampleUnitManager = null!;
     
     private void Awake()
     {
@@ -28,5 +29,6 @@ public class ExamplesMod : BaseUnityPlugin
         _damageSpellCardManager = new DamageSpellCardManager(Logger, Config);
         _enchantCardManager = new EnchantCardManager(Logger, Config);
         _summonCardManager = new SummonCardManager(Logger, Config);
+        _exampleUnitManager = new ExampleUnitManager(Logger, Config);
     }
 }
